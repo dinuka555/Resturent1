@@ -1,131 +1,50 @@
-name: Pipeline100
+name: nextjs-cloud-run
 
-on: [push]
+on:
+  push:
+    branches:
+      - master
+      - main
+
 env:
-  APPLICATION_NAME: python-app
-  GKE_CLUSTER: din-cluster
-  IMAGE: static-site
-  DEPLOYMENT_NAME: gke-test
+  PROJECT_ID: ${{ secrets.CLOUD_RUN_PROJECT_NAME }}
+  REGION: us-east1
+  # project-name but it can be anything you want
+  REPO_NAME: nextjs-cloud-run
+
 jobs:
-
- lint:
+  build-and-deploy:
+    name: Setup, Build, and Deploy
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v2
-    - name: Setup Python environment
-      uses: actions/setup-python@v2
-    - name: Install requirements
-      run: pip install --quiet --requirement requirements.txt
-    - name: Lint code
-      run: |
-        flake8 --ignore=E501,E231,E0401,E302,E305,E121,E265,E0602,E999,E111,E113,E0001,E225,E303,E228,F821,F841,W293,E1305,E902,E211,E251,W0612,C0303,W1514,R1732 *.py
-        pylint --disable=C0301,C0116,C0114,C0103,W0612,C0303,E1305,E0602,C0209 --disable=W0612,W1514,C0303,E1305,E0602,R1732 *.py       
-  
- build_image:
-    needs: [lint]
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v0
-    - name: Set up GCloud
-      uses: google-github-actions/setup-gcloud@main
-      with:
-        version: '290.0.1'
-        service_account_email: ${{ secrets.GCP_SERVICE_ACCT_EMAIL }}
-        service_account_key: ${{ secrets.GCP_SERVICE_ACCT_KEY }}
-    - run: |
-        gcloud config set project ${{ secrets.GCP_PROJECT_ID }}
-        #gcloud config set run/region ${{ secrets.GCP_REGION }}
-        gcloud auth configure-docker
-        gcloud info
-    
-    - name: Build and tag image
-      run: docker build  -t "gcr.io/${{ secrets.GCP_PROJECT_ID }}/${{ env.APPLICATION_NAME }}:latest" .
- 
-      
-    - name: Push to GCP image registry
-      run: docker push gcr.io/${{ secrets.GCP_PROJECT_ID }}/${{ env.APPLICATION_NAME }}:latest
+      - name: Checkout
+        uses: actions/checkout@v3
 
- test_image:
-    needs: [build_image]
-    runs-on: ubuntu-18.04
-    steps:
-    - name: Set up GCloud
-      uses: GoogleCloudPlatform/github-actions/setup-gcloud@master
-      with:
-        version: '274.0.1'
-        service_account_email: ${{ secrets.GCP_SERVICE_ACCT_EMAIL }}
-        service_account_key: ${{ secrets.GCP_SERVICE_ACCT_KEY }}
-    - run: |
-        gcloud config set project ${{ secrets.GCP_PROJECT_ID }}
-        gcloud config set run/region ${{ secrets.GCP_REGION }}
-        gcloud auth configure-docker
-        gcloud info
-      
-    - name: Run unit tests in container
-      run: docker run "gcr.io/${{ secrets.GCP_PROJECT_ID }}/${{ env.APPLICATION_NAME }}:latest" -m unittest --verbose --failfast
+      # Authenticate with Google Cloud
+      - id: "auth"
+        uses: "google-github-actions/auth@v0"
+        with:
+          credentials_json: "${{ secrets.CLOUD_RUN_SERVICE_ACCOUNT }}"
 
- deploy:
-    needs: [test_image]
-    runs-on: ubuntu-18.04
-    steps:
-    - name: Set up GCloud
-      uses: GoogleCloudPlatform/github-actions/setup-gcloud@master
-      with:
-        version: '274.0.1'
-        service_account_email: ${{ secrets.GCP_SERVICE_ACCT_EMAIL }}
-        service_account_key: ${{ secrets.GCP_SERVICE_ACCT_KEY }}
-    - run: |
-        gcloud config set project ${{ secrets.GCP_PROJECT_ID }}
-        gcloud config set run/region ${{ secrets.GCP_REGION }}
-        gcloud info
-        
-    # Deploy the Docker image to the GKE cluster#
-    - name: Deploy
-      run: |
-        gcloud container clusters get-credentials $GKE_CLUSTER \
-          --zone ${{ secrets.GCP_REGION }} \
-          --project ${{ secrets.GCP_PROJECT_ID }}
-        kubectl get services -o wide
-        #kubectl create deployment satellites2  --replicas=2 --image="gcr.io/${{ secrets.GCP_PROJECT_ID }}/${{ env.APPLICATION_NAME }}:latest" 
-        
-        cat <<EOF | kubectl apply -f -
-        apiVersion: v1
-        kind: Service
-        metadata:
-          name: satellite-python-service
-        spec:
-          selector:
-            app: satellite
-          ports:
-          - protocol: "TCP"
-            port: 90
-            targetPort: 5000
-          type: LoadBalancer
-          
-        ---
-        
-        apiVersion: apps/v1
-        kind: Deployment
-        metadata:
-          name: satellite
-        spec:
-          selector:
-            matchLabels:
-              app: satellite
-          replicas: 2
-          template:
-            metadata:
-              labels:
-                app: satellite
-            spec:
-              containers:
-              - name: satellite
-                image: gcr.io/${{ secrets.GCP_PROJECT_ID }}/${{ env.APPLICATION_NAME }}
-                imagePullPolicy: Always
-                ports:
-                - containerPort: 5000
-        EOF
+      # Setup gcloud CLI/SDK
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v0
 
+      - name: Authorize Docker push
+        run: gcloud auth configure-docker
 
+      - name: Build and tag the docker image
+        run: |-
+          docker build . --tag gcr.io/$PROJECT_ID/$REPO_NAME:$GITHUB_SHA
 
+      - name: Push the image to the Google Container Registry (GCR)
+        run: |-
+          docker push gcr.io/$PROJECT_ID/$REPO_NAME:$GITHUB_SHA
 
+      - name: Deploy
+        run: |-
+          gcloud run deploy $REPO_NAME \
+          --region $REGION \
+          --image gcr.io/$PROJECT_ID/$REPO_NAME:$GITHUB_SHA \
+          --platform "managed" \
+          --quiet
