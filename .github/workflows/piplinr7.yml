@@ -7,8 +7,9 @@ on:
       - main
 
 env:
-  PROJECT_ID: ${{ secrets.CLOUD_RUN_PROJECT_NAME }}
-  REGION: us-east1
+  #PROJECT_ID: ${{ secrets.CLOUD_RUN_PROJECT_NAME }}
+  PROJECT_ID: resturent-408622
+  #REGION: us-east1
   # project-name but it can be anything you want
   IMAGE_NAME: nextjs-cloud-run
   
