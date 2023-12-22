@@ -11,6 +11,7 @@ env:
   REGION: us-east1
   # project-name but it can be anything you want
   REPO_NAME: nextjs-cloud-run
+  
 
 jobs:
   build-and-deploy:
@@ -35,11 +36,12 @@ jobs:
 
       - name: Build and tag the docker image
         run: |-
-          docker build . --tag gcr.io/$PROJECT_ID/$REPO_NAME:$GITHUB_SHA
+          docker build . --tag gcr.io/$PROJECT_ID/$REPO_NAME:latest
+          
 
       - name: Push the image to the Google Container Registry (GCR)
         run: |-
-          docker push gcr.io/$PROJECT_ID/$REPO_NAME:$GITHUB_SHA
+          docker push gcr.io/$PROJECT_ID/$REPO_NAME:latest
 
       - name: Deploy
         run: |-
